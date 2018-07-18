@@ -33,7 +33,7 @@
 
 #define WRP_ERROR( ... ) cimplog_error(LOGGING_MODULE, __VA_ARGS__)
 #define WRP_INFO( ... )  cimplog_info(LOGGING_MODULE, __VA_ARGS__)
-#define WRP_DEBUG( ... ) cimplog_debug(LOGGING_MODULE, __VA_ARGS__)
+#define WRP_DEBUG( ... ) cimplog_info(LOGGING_MODULE, __VA_ARGS__)
 
 /*----------------------------------------------------------------------------*/
 /*                               Data Structures                              */
@@ -129,6 +129,7 @@ static void decodeMapRequest( msgpack_object deserialized, struct req_res_t **de
 static void mapCommonString( msgpack_packer *pk, struct req_res_t *encodeComReq );
 static int alterMap( char * buf );
 static char* strdupptr( const char *s, const char *e );
+static void decodeSpansArray( msgpack_object deserialized, struct req_res_t **decodeMapReq );
 
 
 /*----------------------------------------------------------------------------*/
@@ -248,10 +249,14 @@ void wrp_free_struct( wrp_msg_t *msg )
             if( NULL != msg->u.req.spans.spans && msg->u.req.spans.count > 0)
             {
                 size_t i;
+                WRP_DEBUG("Inside Free spans \n" );
                 for ( i = 0; i < msg->u.req.spans.count; i++ ) {
+                    WRP_DEBUG("Freeing spans.name \n" );
                     free( msg->u.req.spans.spans[i].name );
                 }
+                WRP_DEBUG("Freeing spans\n" );
                 free(msg->u.req.spans.spans);
+                WRP_DEBUG("Freed spans\n" );
             }
             break;
         case WRP_MSG_TYPE__EVENT:
@@ -1435,24 +1440,7 @@ static void decodeRequest( msgpack_object deserialized, struct req_res_t **decod
                                 WRP_DEBUG("tmpdecodeReq->partner_ids[%d] %s\n", cnt, tmpdecodeReq->partner_ids->partner_ids[cnt] );
                             }
                         }else if( strcmp( keyName, WRP_SPANS.name ) == 0 ) {
-                            msgpack_object_array array = ValueType.via.array;
-                            msgpack_object *ptr = array.ptr;
-                            uint32_t cnt = 0;
-                            ptr = array.ptr;
-                            tmpdecodeReq->spans.spans = (struct money_trace_span * ) malloc( sizeof(struct money_trace_span )
-                                                    + sizeof( char * ) * array.size );
-                            tmpdecodeReq->spans.count = array.size;
-
-                            for( cnt = 0; cnt < array.size; cnt++, ptr++ ) {
-                                tmpdecodeReq->spans.spans[cnt].name = ( char * ) malloc( ptr->via.str.size + 1 );
-                                memset( tmpdecodeReq->spans.spans[cnt].name, 0, ptr->via.str.size + 1 );
-                                memcpy( tmpdecodeReq->spans.spans[cnt].name, ptr->via.str.ptr, ptr->via.str.size );
-                                WRP_DEBUG("tmpdecodeReq->spans.spans[%d].name %s\n", cnt, tmpdecodeReq->spans.spans[cnt].name );
-                                tmpdecodeReq->spans.spans[cnt].start = ptr->via.u64;
-                                WRP_DEBUG("tmpdecodeReq->spans.spans[%d].start %lu\n", cnt, tmpdecodeReq->spans.spans[cnt].start );
-                                tmpdecodeReq->spans.spans[cnt].duration = ptr->via.i64;
-                                WRP_DEBUG("tmpdecodeReq->spans.spans[%d].duration %d\n", cnt, tmpdecodeReq->spans.spans[cnt].duration );
-                            }
+                            decodeSpansArray( ValueType, decodeReq );
                         }
                         else {
                             WRP_ERROR("Not Handled MSGPACK_OBJECT_ARRAY %s\n", keyName );
@@ -1859,4 +1847,55 @@ static char* strdupptr( const char *s, const char *e )
     }
 
     return strndup(s, (size_t) (((uintptr_t)e) - ((uintptr_t)s)));
+}
+
+static void decodeSpansArray( msgpack_object deserialized, struct req_res_t **decodeReq )
+{
+    msgpack_object_array array = deserialized.via.array;
+    msgpack_object *ptr = array.ptr;
+    uint32_t cnt = 0;
+    ptr = array.ptr;
+    struct req_res_t *tmpdecodeReq = *decodeReq;
+    tmpdecodeReq->spans.spans = (struct money_trace_span * ) malloc( sizeof(struct money_trace_span ) * array.size );
+    tmpdecodeReq->spans.count = array.size;
+
+    for( cnt = 0; cnt < array.size; cnt++, ptr++ )
+    {
+        msgpack_object_array array1 = ptr->via.array;
+        msgpack_object *ptr1 = array1.ptr;
+        uint32_t j = 0;
+        for(j=0; j< array1.size; j++, ptr1++)
+        {
+            switch(ptr1->type)
+            {
+                case MSGPACK_OBJECT_STR: {
+                    tmpdecodeReq->spans.spans[cnt].name = ( char * ) malloc( ptr1->via.str.size + 1 );
+                    memset( tmpdecodeReq->spans.spans[cnt].name, 0, ptr1->via.str.size + 1 );
+                    memcpy( tmpdecodeReq->spans.spans[cnt].name, ptr1->via.str.ptr, ptr1->via.str.size );
+                    WRP_DEBUG("tmpdecodeReq->spans.spans[%d].name %s\n", cnt, tmpdecodeReq->spans.spans[cnt].name );
+                }
+                break;
+
+                case MSGPACK_OBJECT_POSITIVE_INTEGER: {
+                    switch(j)
+                    {
+                        case 1:
+                            tmpdecodeReq->spans.spans[cnt].start = ptr1->via.u64;
+                            WRP_DEBUG("tmpdecodeReq->spans.spans[%d].start %llu\n", cnt, tmpdecodeReq->spans.spans[cnt].start );
+                            break;
+                        case 2:
+                            tmpdecodeReq->spans.spans[cnt].duration = ptr1->via.u64;
+                            WRP_DEBUG("tmpdecodeReq->spans.spans[%d].duration %lu\n", cnt, tmpdecodeReq->spans.spans[cnt].duration );
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                break;
+
+                default:
+                    break;
+            }
+        }
+    }
 }
