@@ -245,6 +245,14 @@ void wrp_free_struct( wrp_msg_t *msg )
 
                 free( msg->u.req.partner_ids );
             }
+            if( NULL != msg->u.req.spans.spans && msg->u.req.spans.count > 0)
+            {
+                size_t i;
+                for ( i = 0; i < msg->u.req.spans.count; i++ ) {
+                    free( msg->u.req.spans.spans[i].name );
+                }
+                free(msg->u.req.spans.spans);
+            }
             break;
         case WRP_MSG_TYPE__EVENT:
             free( msg->u.event.source );
@@ -1426,7 +1434,27 @@ static void decodeRequest( msgpack_object deserialized, struct req_res_t **decod
                                 memcpy( tmpdecodeReq->partner_ids->partner_ids[cnt], ptr->via.str.ptr, ptr->via.str.size );
                                 WRP_DEBUG("tmpdecodeReq->partner_ids[%d] %s\n", cnt, tmpdecodeReq->partner_ids->partner_ids[cnt] );
                             }
-                        } else {
+                        }else if( strcmp( keyName, WRP_SPANS.name ) == 0 ) {
+                            msgpack_object_array array = ValueType.via.array;
+                            msgpack_object *ptr = array.ptr;
+                            uint32_t cnt = 0;
+                            ptr = array.ptr;
+                            tmpdecodeReq->spans.spans = (struct money_trace_span * ) malloc( sizeof(struct money_trace_span )
+                                                    + sizeof( char * ) * array.size );
+                            tmpdecodeReq->spans.count = array.size;
+
+                            for( cnt = 0; cnt < array.size; cnt++, ptr++ ) {
+                                tmpdecodeReq->spans.spans[cnt].name = ( char * ) malloc( ptr->via.str.size + 1 );
+                                memset( tmpdecodeReq->spans.spans[cnt].name, 0, ptr->via.str.size + 1 );
+                                memcpy( tmpdecodeReq->spans.spans[cnt].name, ptr->via.str.ptr, ptr->via.str.size );
+                                WRP_DEBUG("tmpdecodeReq->spans.spans[%d].name %s\n", cnt, tmpdecodeReq->spans.spans[cnt].name );
+                                tmpdecodeReq->spans.spans[cnt].start = ptr->via.u64;
+                                WRP_DEBUG("tmpdecodeReq->spans.spans[%d].start %lu\n", cnt, tmpdecodeReq->spans.spans[cnt].start );
+                                tmpdecodeReq->spans.spans[cnt].duration = ptr->via.i64;
+                                WRP_DEBUG("tmpdecodeReq->spans.spans[%d].duration %d\n", cnt, tmpdecodeReq->spans.spans[cnt].duration );
+                            }
+                        }
+                        else {
                             WRP_ERROR("Not Handled MSGPACK_OBJECT_ARRAY %s\n", keyName );
                         }
 
@@ -1621,8 +1649,8 @@ static ssize_t __wrp_bytes_to_struct( const void *bytes, const size_t length,
                         msg->u.req.headers = decodeReq->headers;
                         msg->u.req.metadata = decodeReq->metadata;
                         msg->u.req.include_spans = decodeReq->include_spans;
-                        msg->u.req.spans.spans = NULL;   /* not supported */
-                        msg->u.req.spans.count = 0;     /* not supported */
+                        msg->u.req.spans.spans = decodeReq->spans.spans;
+                        msg->u.req.spans.count = decodeReq->spans.count;
                         msg->u.req.payload = decodeReq->payload;
                         msg->u.req.payload_size = decodeReq->payload_size;
                         msg->u.req.partner_ids = decodeReq->partner_ids;
